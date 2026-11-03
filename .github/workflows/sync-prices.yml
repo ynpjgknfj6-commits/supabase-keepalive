@@ -1,0 +1,22 @@
+name: F1 Fantasy - službene cijene
+
+on:
+  schedule:
+    # Cijene se mijenjaju nakon utrke; provjera ponedjeljak–četvrtak ujutro (UTC) uhvati i kasne promjene.
+    - cron: '0 6 * * 1-4'
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Povuci i upiši cijene
+        run: node scripts/sync-prices.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

@@ -1,0 +1,55 @@
+name: Supabase keepalive
+
+# Free Supabase projects pause after 7 days without activity.
+# This pings the database every 3 days so the F1 Fantasy project stays awake.
+
+on:
+  schedule:
+    - cron: "17 6 */3 * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/keepalive.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: https://aftqqefagxvhulhfcyhg.supabase.co
+      SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+    steps:
+      - name: Ping Supabase database
+        run: |
+          set -u
+          if [ -z "$SUPABASE_KEY" ]; then
+            echo "::error::Secret SUPABASE_ANON_KEY is not set"; exit 1
+          fi
+          auth=(-H "apikey: $SUPABASE_KEY" -H "Authorization: Bearer $SUPABASE_KEY")
+
+          # Ask PostgREST for its schema, then read one row from the first table.
+          code=$(curl -sS -o schema.json -w '%{http_code}' --max-time 60 "${auth[@]}" "$SUPABASE_URL/rest/v1/" || echo 000)
+          echo "REST root: HTTP $code"
+          table=$(python3 -c "import json;p=json.load(open('schema.json')).get('paths',{});t=[k.strip('/') for k in p if k.strip('/') and not k.startswith('/rpc/')];print(t[0] if t else '')" 2>/dev/null || true)
+
+          if [ -n "$table" ]; then
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 "${auth[@]}" "$SUPABASE_URL/rest/v1/$table?select=*&limit=1" || echo 000)
+            echo "Table $table: HTTP $code"
+          fi
+
+          # 2xx/4xx means the database answered. 5xx or no answer means it is down or paused.
+          if [ "$code" = "000" ] || [ "$code" -ge 500 ]; then
+            echo "::error::Supabase did not respond (HTTP $code). The project may be paused: restore it in the Supabase dashboard."
+            exit 1
+          fi
+
+      - name: Record ping (keeps the scheduled workflow from being disabled)
+        uses: actions/checkout@v4
+      - run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > last-ping.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add last-ping.txt
+          git commit -m "Keepalive ping" && git push || echo "Nothing to commit"
